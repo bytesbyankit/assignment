@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 import fs from 'fs';
 import path from 'path';
 
@@ -10,6 +10,7 @@ export class LLMService {
      */
     static async extractTasks(transcript: string): Promise<any> {
         const apiKey = process.env.LLM_API_KEY;
+
         const promptTemplate = fs.readFileSync(this.PROMPT_PATH, 'utf-8');
         const prompt = promptTemplate.replace('${transcript}', transcript);
 
@@ -19,18 +20,21 @@ export class LLMService {
         }
 
         try {
-            const genAI = new GoogleGenerativeAI(apiKey);
-            const model = genAI.getGenerativeModel({
-                model: 'gemini-1.5-flash',
-                generationConfig: {
+            const ai = new GoogleGenAI({ apiKey });
+
+            const result = await ai.models.generateContent({
+                model: 'gemini-2.0-flash',
+                contents: prompt,
+                config: {
                     responseMimeType: "application/json",
                 }
             });
 
-            const result = await model.generateContent(prompt);
-            const response = await result.response;
-            const text = response.text();
-            console.log(text);
+            const text = result.text;
+
+            if (!text) {
+                throw new Error('Empty response from LLM');
+            }
 
             try {
                 return JSON.parse(text);
@@ -38,9 +42,12 @@ export class LLMService {
                 console.error('Failed to parse Gemini response as JSON:', text);
                 throw new Error('Invalid JSON response from LLM');
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error('LLM API Call failed:', error);
-            throw new Error('Failed to extract tasks from LLM');
+            if (error.status) {
+                console.error('Error Status:', error.status);
+            }
+            throw new Error(`Failed to extract tasks from LLM: ${error.message || 'Unknown error'}`);
         }
     }
 
