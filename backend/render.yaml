@@ -13,9 +13,8 @@ services:
       - key: DATABASE_URL
         value: file:/data/sqlite.db
       - key: FRONTEND_URL
-        # You should update this to your actual Render frontend URL when you deploy the frontend
         value: "https://assignment-nine-cyan.vercel.app/" 
     disk:
       name: sqlite-data
       mountPath: /data
-      sizeGB: 1
+      sizeGB: .5
