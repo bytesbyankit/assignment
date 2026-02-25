@@ -11,10 +11,6 @@ services:
       - key: PORT
         value: 3000
       - key: DATABASE_URL
-        value: file:/data/sqlite.db
+        value: file:./production.db
       - key: FRONTEND_URL
-        value: "https://assignment-nine-cyan.vercel.app/" 
-    disk:
-      name: sqlite-data
-      mountPath: /data
-      sizeGB: .5
+        value: "https://assignment-nine-cyan.vercel.app/"
