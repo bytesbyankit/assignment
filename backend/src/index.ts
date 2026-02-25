@@ -19,16 +19,18 @@ app.get('/health', (req, res) => {
     res.json({ status: 'ok' });
 });
 
-const server = app.listen(port, () => {
-    console.log(`Server is running on port ${port}`);
-});
+if (require.main === module) {
+    const server = app.listen(port, () => {
+        console.log(`Server is running on port ${port}`);
+    });
 
-server.on('error', (error) => {
-    console.error('Server error:', error);
-});
+    server.on('error', (error: any) => {
+        console.error('Server error:', error);
+    });
 
-server.on('close', () => {
-    console.log('Server closed');
-});
+    server.on('close', () => {
+        console.log('Server closed');
+    });
+}
 
 export { app, prisma };

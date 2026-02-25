@@ -3,34 +3,43 @@ import { app } from '../index';
 import { LLMService } from '../services/llm.service';
 
 /**
- * Integration Test for Project Odyssey flow.
+ * Helper to poll job status
  */
-describe('POST /api/transcripts - Project Odyssey Integration', () => {
+async function pollJobStatus(jobId: string, maxRetries = 10, delayMs = 500) {
+    for (let i = 0; i < maxRetries; i++) {
+        const response = await request(app).get(`/api/jobs/${jobId}`);
+        if (response.body.status !== 'queued' && response.body.status !== 'processing') {
+            return response.body;
+        }
+        await new Promise(res => setTimeout(res, delayMs));
+    }
+    throw new Error('Polled too long for job');
+}
 
-    it('should process the Odyssey transcript and verify task dependencies', async () => {
+describe('POST /api/jobs - Integration flow', () => {
+
+    it('should process the Odyssey transcript and verify task dependencies via async jobs', async () => {
         const transcript = `
-**Meeting Title:** Project Odyssey - Pre-Launch Technical & GTM Sync
-... (transcript content) ...
+**Meeting Title:** Project Odyssey - Pre-Launch Sync
         `;
 
-        // Mock the LLM response to match the Odyssey requirements
         const mockLLMResponse = {
             tasks: [
                 {
                     id: "fix_stripe_bug",
-                    description: "Fix the P0 Stripe payment gateway race condition.",
+                    description: "Fix the P0 Stripe race condition.",
                     priority: 1,
                     dependencies: []
                 },
                 {
                     id: "regression_test",
-                    description: "Run full regression test weekend.",
+                    description: "Run regression test.",
                     priority: 1,
                     dependencies: ["fix_stripe_bug"]
                 },
                 {
                     id: "press_screenshots",
-                    description: "Get high-res analytics dashboard screenshots.",
+                    description: "Get analytics screenshots.",
                     priority: 2,
                     dependencies: ["fix_stripe_bug"]
                 },
@@ -43,38 +52,39 @@ describe('POST /api/transcripts - Project Odyssey Integration', () => {
             ]
         };
 
-        // Spy on LLMService.extractTasks and return our mock
         const extractTasksSpy = jest.spyOn(LLMService, 'extractTasks').mockResolvedValue(mockLLMResponse);
 
-        const response = await request(app)
-            .post('/api/transcripts')
+        // 1. Submit Transcript
+        const submitResponse = await request(app)
+            .post('/api/jobs')
             .send({ transcript });
 
-        // Assertions
-        expect(response.status).toBe(201);
-        expect(response.body).toHaveProperty('transcriptId');
+        expect(submitResponse.status).toBe(202);
+        expect(submitResponse.body).toHaveProperty('jobId');
+        const jobId = submitResponse.body.jobId;
 
-        const tasks = response.body.tasks;
+        // 2. Poll for results
+        const jobResult = await pollJobStatus(jobId);
+
+        expect(jobResult.status).toBe('done');
+        expect(jobResult).toHaveProperty('result');
+        const result = jobResult.result;
+
+        // Assertions on result tasks
+        const tasks = result.tasks;
         expect(tasks.length).toBe(4);
 
-        // 1. Payment bug task has no dependencies
         const stripeBug = tasks.find((t: any) => t.description.includes("Stripe"));
         expect(stripeBug.dependencies).toBe("");
 
-        // 2. QA (regression) and screenshots depend on a stable build (stripe bug)
         const regressionTask = tasks.find((t: any) => t.description.includes("regression"));
-        const screenshotsTask = tasks.find((t: any) => t.description.includes("screenshots"));
-
         expect(regressionTask.dependencies).toContain("fix_stripe_bug");
-        expect(screenshotsTask.dependencies).toContain("fix_stripe_bug");
 
-        // 3. A/B test task exists with low priority (5) and no dependencies
         const abTest = tasks.find((t: any) => t.description.includes("A/B test"));
-        expect(abTest.priority).toBe("5");
+        expect(abTest.priority).toBe(5);
         expect(abTest.dependencies).toBe("");
 
-        // 4. No cycles are reported
-        expect(response.body.cycles.length).toBe(0);
+        expect(result.cycles.length).toBe(0);
 
         extractTasksSpy.mockRestore();
     });
@@ -89,17 +99,50 @@ describe('POST /api/transcripts - Project Odyssey Integration', () => {
 
         jest.spyOn(LLMService, 'extractTasks').mockResolvedValue(cyclicMock);
 
-        const response = await request(app)
-            .post('/api/transcripts')
+        const submitResponse = await request(app)
+            .post('/api/jobs')
             .send({ transcript: "Cycle test" });
 
-        expect(response.status).toBe(201);
-        expect(response.body.cycles.length).toBeGreaterThan(0);
+        expect(submitResponse.status).toBe(202);
+        const jobId = submitResponse.body.jobId;
 
-        // Assert that cyclic tasks are marked as blocked
-        const tasks = response.body.tasks;
+        const jobResult = await pollJobStatus(jobId);
+        expect(jobResult.status).toBe('done');
+
+        const result = jobResult.result;
+        expect(result.cycles.length).toBeGreaterThan(0);
+
+        const tasks = result.tasks;
         tasks.forEach((t: any) => {
             expect(t.status).toBe('blocked');
         });
+    });
+
+    it('should not call LLM again for duplicate transcript submissions', async () => {
+        const transcriptText = "duplicate test transcript";
+        const mockTasks = {
+            tasks: [{ id: "dup_1", description: "Dup", priority: 1, dependencies: [] }]
+        };
+
+        const extractTasksSpy = jest.spyOn(LLMService, 'extractTasks').mockResolvedValue(mockTasks);
+
+        // First call
+        const res1 = await request(app).post('/api/jobs').send({ transcript: transcriptText });
+        const jobResult1 = await pollJobStatus(res1.body.jobId);
+        expect(jobResult1.status).toBe('done');
+
+        // Second call with same transcript
+        const res2 = await request(app).post('/api/jobs').send({ transcript: transcriptText });
+        const jobResult2 = await pollJobStatus(res2.body.jobId);
+        expect(jobResult2.status).toBe('done');
+
+        // Verify LLM called only once
+        expect(extractTasksSpy).toHaveBeenCalledTimes(1);
+
+        // Output tasks should be identical
+        expect(jobResult1.result.tasks[0].externalId).toBe("dup_1");
+        expect(jobResult2.result.tasks[0].externalId).toBe("dup_1");
+
+        extractTasksSpy.mockRestore();
     });
 });

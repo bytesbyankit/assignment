@@ -10,7 +10,7 @@ datasource db {
 model Transcript {
   id             Int      @id @default(autoincrement())
   transcriptText String
-  transcriptHash String
+  transcriptHash String   @unique
   createdAt      DateTime @default(now())
   tasks          Task[]
 }
@@ -19,11 +19,15 @@ model Task {
   id           Int        @id @default(autoincrement())
   transcriptId Int
   transcript   Transcript @relation(fields: [transcriptId], references: [id])
+  externalId   String
   description  String
-  priority     String
+  priority     Int
   dependencies String
   status       String
   createdAt    DateTime   @default(now())
+
+  @@index([externalId])
+  @@unique([transcriptId, externalId])
 }
 
 model Job {
