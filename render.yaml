@@ -1,8 +1,9 @@
 services:
   - type: web
     name: assignment-backend
-    env: node
+    runtime: node
     plan: free
+    rootDir: backend
     buildCommand: npm install && prisma generate && npm run build
     startCommand: npm start
     envVars:
